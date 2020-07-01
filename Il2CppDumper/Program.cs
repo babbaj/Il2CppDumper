@@ -219,13 +219,17 @@ namespace Il2CppDumper
             var decompiler = new Il2CppDecompiler(executor);
             decompiler.Decompile(config, outputDir);
             Console.WriteLine("Done!");
-            if (config.GenerateScript)
+            /*if (config.GenerateScript)
             {
                 Console.WriteLine("Generate script...");
                 var scriptGenerator = new ScriptGenerator(executor);
                 scriptGenerator.WriteScript(outputDir);
                 Console.WriteLine("Done!");
-            }
+            }*/
+            Console.WriteLine("Generate script...");
+            var scriptGenerator = new CoolHeaderGenerator(executor);
+            scriptGenerator.WriteHeader(outputDir);
+            Console.WriteLine("Done!");
             if (config.GenerateDummyDll)
             {
                 Console.WriteLine("Generate dummy dll...");
