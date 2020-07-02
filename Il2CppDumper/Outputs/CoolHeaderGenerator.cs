@@ -48,16 +48,32 @@ namespace Il2CppDumper
             StringBuilder sb = new StringBuilder();
 
             var preHeader = new StringBuilder();
-            var headerStruct = new StringBuilder();
-            foreach (var info in structInfoList) // TODO: this will need to be sorted so inheritance will work
+            var headerStructs = new StringBuilder();
+
+            foreach (StructInfo info in structInfoList) 
             {
-                preHeader.Append($"struct {info.TypeName}_o;\n"); // TODO: this should be unnecessary
-                headerStruct.Append(DefineStruct(info));
+                preHeader.Append($"struct {info.TypeName}_o;\n");
             }
+
+
+            IEnumerable<StructInfo> valueTypes = structInfoList.Where(info => info.IsValueType); // TODO: this needs to be sorted
+            IEnumerable<StructInfo> classes = structInfoList.Where(info => !info.IsValueType).OrderBy(info => info.typeDef, Comparer<Il2CppTypeDefinition>.Create(orderByInheritance));
+
+            foreach(StructInfo info in valueTypes)
+            {
+                headerStructs.Append(RecursiveDefineValueTypes(info));
+            }
+
+            foreach (StructInfo info in classes)
+            {
+                headerStructs.Append(DefineStruct(info));
+            }
+            
 
             sb.Append(head());
             sb.Append(arrayClassPreHeader);
-            sb.Append(headerStruct);
+            sb.Append(preHeader);
+            sb.Append(headerStructs);
             sb.Append(arrayClassHeader);
             sb.Append(tail());
             return sb.ToString();
@@ -166,7 +182,35 @@ namespace Il2CppDumper
             }
         }
 
-       
+
+        Il2CppTypeDefinition getParent(Il2CppTypeDefinition typeDef)
+        {
+            if (typeDef.parentIndex < 0) return null;
+            var parent = il2Cpp.types[typeDef.parentIndex];
+            return GetTypeDefinition(parent);
+        }
+
+        // returns the given type and its parents
+        IEnumerable<Il2CppTypeDefinition> parents(Il2CppTypeDefinition typeDef)
+        {
+            for (var parent = typeDef; parent != null; parent = getParent(parent))
+            {
+                yield return parent;
+            }
+        }
+
+        IEnumerable<Il2CppTypeDefinition> parents(StructInfo info)
+        {
+            return parents(info.typeDef);
+        }
+
+        int orderByInheritance(Il2CppTypeDefinition a, Il2CppTypeDefinition b)
+        {
+            if (parents(a).Contains(b)) return 1;
+            else if (parents(b).Contains(a)) return -1;
+            else return 0;
+        }
+
 
         ulong? offsetOfClass(Il2CppTypeDefinition def)
         {
@@ -183,17 +227,58 @@ namespace Il2CppDumper
         private string DefineStruct(StructInfo info)
         {
             StringBuilder sb = new StringBuilder();
-            sb.Append(StaticFieldsStruct(info));
-            sb.Append(VTableStruct(info));
-            sb.Append(ClassStruct(info));
-            sb.Append(ObjectStruct(info));
+            if (!info.IsValueType)
+            {
+                sb.Append(StaticFieldsStruct(info));
+                sb.Append(VTableStruct(info));
+                sb.Append(ClassStruct(info));
+                sb.Append(ObjectStruct(info));
+            }
+            else
+            {
+                // Value types need to be ordered differently because static_fields can have instances of it
+                sb.Append(ObjectStruct(info));
+                sb.Append(StaticFieldsStruct(info));
+                sb.Append(VTableStruct(info));
+                sb.Append(ClassStruct(info));
+            }
+            
             sb.Append('\n');
 
             return sb.ToString();
         }
 
+        private string RecursiveDefineValueTypes(StructInfo info)
+        {
+            return RecursiveDefineValueTypes(info, new HashSet<StructInfo>());
+        }
+        private string RecursiveDefineValueTypes(StructInfo info, HashSet<StructInfo> structCache)
+        {
+            if (!structCache.Add(info)) return string.Empty;
+
+            var pre = new StringBuilder();
+
+            foreach (var field in info.Fields)
+            {
+                if (field.IsValueType)
+                {
+                    var fieldInfo = structInfoWithStructName[field.FieldTypeName];
+                    pre.Append(RecursiveDefineValueTypes(fieldInfo, structCache));
+                }
+            }
+            foreach (var field in info.StaticFields)
+            {
+                if (field.IsValueType)
+                {
+                    var fieldInfo = structInfoWithStructName[field.FieldTypeName];
+                    pre.Append(RecursiveDefineValueTypes(fieldInfo, structCache));
+                }
+            }
+
+            return pre.Append(DefineStruct(info)).ToString();
+        }
+
         // _c
-        // TODO: offset
         private string ClassStruct(StructInfo info)
         {
             StringBuilder sb = new StringBuilder();
@@ -201,12 +286,13 @@ namespace Il2CppDumper
             var address = offsetOfClass(info.typeDef);
             if (address != null)
             {
-                sb.Append($"\tstatic constexpr auto offset = {offsetOfClass(info.typeDef)};\n");
+                var offset = offsetOfClass(info.typeDef);
+                sb.Append($"\tstatic constexpr auto offset = 0x{offset:X};\n");
             }
             sb.Append(
                 $"\tIl2CppClass_1 _1;\n" +
                 $"\t{pointer($"{info.TypeName}_StaticFields")} static_fields;\n" +
-                 "\tvoid* rgctx_data;\n" + //$"\t{pointer($"{info.TypeName}_RGCTXs")} rgctx_data;\n" +
+                $"\t{pointer("void")} rgctx_data;\n" + //$"\t{pointer($"{info.TypeName}_RGCTXs")} rgctx_data;\n" +
                 $"\tIl2CppClass_2 _2;\n" +
                 $"\t{info.TypeName}_VTable vtable;\n" +
                 $"}};\n"
@@ -230,8 +316,8 @@ namespace Il2CppDumper
                 sb.Append($"struct {info.TypeName}_o {{\n");
                 if (!info.IsValueType)
                 {
-                    sb.Append($"\t{info.TypeName}_c *klass;\n");
-                    sb.Append($"\tvoid *monitor;\n");
+                    sb.Append($"\t{pointer($"{info.TypeName}_c")} klass;\n");
+                    sb.Append($"\t{pointer("void")} monitor;\n");
                 }
             }
             
@@ -462,7 +548,7 @@ namespace Il2CppDumper
                     if (parentDef != null)
                     {
                         SetParent(parentDef, structInfo);
-                        if (parentDef.field_count > 0)
+                        if (parentDef.field_count > 0) // Not sure if this should be here
                         {
                             var fieldEnd = parentDef.fieldStart + parentDef.field_count;
                             for (var i = parentDef.fieldStart; i < fieldEnd; ++i)
