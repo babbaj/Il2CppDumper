@@ -19,7 +19,6 @@ namespace Il2CppDumper
         private HashSet<string> structNameHashSet = new HashSet<string>(StringComparer.Ordinal);
         private List<StructInfo> structInfoList = new List<StructInfo>();
         private Dictionary<string, StructInfo> structInfoWithStructName = new Dictionary<string, StructInfo>();
-        private HashSet<StructInfo> structCache = new HashSet<StructInfo>();
         private Dictionary<Il2CppTypeDefinition, string> structNameDic = new Dictionary<Il2CppTypeDefinition, string>();
         private Dictionary<ulong, string> genericClassStructNameDic = new Dictionary<ulong, string>();
         private Dictionary<string, Il2CppType> nameGenericClassDic = new Dictionary<string, Il2CppType>();
@@ -50,10 +49,10 @@ namespace Il2CppDumper
 
             var preHeader = new StringBuilder();
             var headerStruct = new StringBuilder();
-            foreach (var info in structInfoList)
+            foreach (var info in structInfoList) // TODO: this will need to be sorted so inheritance will work
             {
-                preHeader.Append($"struct {info.TypeName}_o;\n");
-                headerStruct.Append(RecursionStructInfo(info));
+                preHeader.Append($"struct {info.TypeName}_o;\n"); // TODO: this should be unnecessary
+                headerStruct.Append(DefineStruct(info));
             }
 
             sb.Append(head());
@@ -76,7 +75,7 @@ namespace Il2CppDumper
             sb.Append("#include <cstdint>\n");
             sb.Append("#include \"pointer.hpp\"\n");
             sb.Append('\n');
-            sb.Append("namespace rust {");
+            sb.Append("namespace rust {\n");
 
             // copy/pasted
             sb.Append(HeaderConstants2.GenericHeader);
@@ -99,7 +98,6 @@ namespace Il2CppDumper
                 default:
                     throw new Exception($"This il2cpp version [{il2Cpp.Version}] does not support generating .h files");
             }
-
 
 
             return sb.ToString();
@@ -168,12 +166,115 @@ namespace Il2CppDumper
             }
         }
 
-        
-        
+       
+
+        ulong? offsetOfClass(Il2CppTypeDefinition def)
+        {
+            foreach (var i in metadata.metadataUsageDic[1]) //kIl2CppMetadataUsageTypeInfo
+            {
+                if (i.Value == def.elementTypeIndex)
+                {
+                    return il2Cpp.GetRVA(il2Cpp.metadataUsages[i.Key]);
+                }
+            }
+            return null;
+        }
+
+        private string DefineStruct(StructInfo info)
+        {
+            StringBuilder sb = new StringBuilder();
+            sb.Append(StaticFieldsStruct(info));
+            sb.Append(VTableStruct(info));
+            sb.Append(ClassStruct(info));
+            sb.Append(ObjectStruct(info));
+            sb.Append('\n');
+
+            return sb.ToString();
+        }
+
+        // _c
+        // TODO: offset
+        private string ClassStruct(StructInfo info)
+        {
+            StringBuilder sb = new StringBuilder();
+            sb.Append($"struct {info.TypeName}_c {{\n");
+            var address = offsetOfClass(info.typeDef);
+            if (address != null)
+            {
+                sb.Append($"\tstatic constexpr auto offset = {offsetOfClass(info.typeDef)};\n");
+            }
+            sb.Append(
+                $"\tIl2CppClass_1 _1;\n" +
+                $"\t{pointer($"{info.TypeName}_StaticFields")} static_fields;\n" +
+                 "\tvoid* rgctx_data;\n" + //$"\t{pointer($"{info.TypeName}_RGCTXs")} rgctx_data;\n" +
+                $"\tIl2CppClass_2 _2;\n" +
+                $"\t{info.TypeName}_VTable vtable;\n" +
+                $"}};\n"
+                );
+
+            return sb.ToString();
+        }
+
+        // _o
+        // TODO: inherit from parent and only list fields for this class
+        private string ObjectStruct(StructInfo info)
+        {
+            StringBuilder sb = new StringBuilder();
+           
+            //sb.Append($"struct {info.TypeName}_o : {structNameDic[info.parentTypeDef]} {{\n");
+            if (info.parentTypeDef != null) {
+                // This is a subclass
+                sb.Append($"struct {info.TypeName}_o : {structNameDic[info.parentTypeDef] + "_o"} {{\n");
+            } else {
+                // This is a base class
+                sb.Append($"struct {info.TypeName}_o {{\n");
+                if (!info.IsValueType)
+                {
+                    sb.Append($"\t{info.TypeName}_c *klass;\n");
+                    sb.Append($"\tvoid *monitor;\n");
+                }
+            }
+            
+
+            foreach (var field in info.Fields)
+            {
+                sb.Append($"\t{field.FieldTypeName} {field.FieldName};\n");
+            }
+            sb.Append("};\n");
+
+            return sb.ToString();
+        }
+
+        // _StaticFields
+        private string StaticFieldsStruct(StructInfo info)
+        {
+            StringBuilder sb = new StringBuilder();
+            sb.Append($"struct {info.TypeName}_StaticFields {{\n");
+            foreach (var field in info.StaticFields)
+            {
+                sb.Append($"\t{field.FieldTypeName} {field.FieldName};\n");
+            }
+            sb.Append("};\n");
+
+            return sb.ToString();
+        }
+
+        // _VTable
+        private string VTableStruct(StructInfo info)
+        {
+            StringBuilder sb = new StringBuilder();
+            sb.Append($"struct {info.TypeName}_VTable {{\n");
+            foreach (var method in info.VTableMethod)
+            {
+                sb.Append($"\tVirtualInvokeData {method.MethodName};\n");
+            }
+            sb.Append("};\n");
+
+            return sb.ToString();
+        }
 
         // everything below here is copy/pasted
 
-       
 
         private static string FixName(string str)
         {
@@ -329,10 +430,11 @@ namespace Il2CppDumper
             structInfoList.Add(structInfo);
             structInfo.TypeName = structNameDic[typeDef];
             structInfo.IsValueType = typeDef.IsValueType;
-            AddParents(typeDef, structInfo);
+            SetParent(typeDef, structInfo);
             AddFields(typeDef, structInfo, null);
             AddVTableMethod(structInfo, typeDef);
             AddRGCTX(structInfo, typeDef);
+            structInfo.typeDef = typeDef;
         }
 
         private void AddGenericClassStruct(ulong pointer)
@@ -343,12 +445,13 @@ namespace Il2CppDumper
             structInfoList.Add(structInfo);
             structInfo.TypeName = genericClassStructNameDic[pointer];
             structInfo.IsValueType = typeDef.IsValueType;
-            AddParents(typeDef, structInfo);
+            SetParent(typeDef, structInfo);
             AddFields(typeDef, structInfo, genericClass.context);
             AddVTableMethod(structInfo, typeDef);
+            structInfo.typeDef = typeDef;
         }
 
-        private void AddParents(Il2CppTypeDefinition typeDef, StructInfo structInfo)
+        private void SetParent(Il2CppTypeDefinition typeDef, StructInfo structInfo)
         {
             if (!typeDef.IsValueType && !typeDef.IsEnum)
             {
@@ -358,7 +461,7 @@ namespace Il2CppDumper
                     var parentDef = GetTypeDefinition(parent);
                     if (parentDef != null)
                     {
-                        AddParents(parentDef, structInfo);
+                        SetParent(parentDef, structInfo);
                         if (parentDef.field_count > 0)
                         {
                             var fieldEnd = parentDef.fieldStart + parentDef.field_count;
@@ -368,7 +471,8 @@ namespace Il2CppDumper
                                 var fieldType = il2Cpp.types[fieldDef.typeIndex];
                                 if ((fieldType.attrs & FIELD_ATTRIBUTE_LITERAL) == 0 && (fieldType.attrs & FIELD_ATTRIBUTE_STATIC) == 0)
                                 {
-                                    structInfo.Parents.Add(GetIl2CppStructName(parent));
+                                    structInfo.parent = GetIl2CppStructName(parent);
+                                    structInfo.parentTypeDef = parentDef;
                                     break;
                                 }
                             }
@@ -524,92 +628,7 @@ namespace Il2CppDumper
             return fixName;
         }
 
-        private string RecursionStructInfo(StructInfo info)
-        {
-            if (!structCache.Add(info))
-            {
-                return string.Empty;
-            }
-
-            var sb = new StringBuilder();
-            var pre = new StringBuilder();
-
-            sb.Append($"struct {info.TypeName}_Fields {{\n");
-            foreach (var field in info.Fields)
-            {
-                if (field.IsValueType)
-                {
-                    var fieldInfo = structInfoWithStructName[field.FieldTypeName];
-                    pre.Append(RecursionStructInfo(fieldInfo));
-                }
-                sb.Append($"\t{field.FieldTypeName} {field.FieldName};\n");
-            }
-            sb.Append("};\n");
-
-            sb.Append($"struct {info.TypeName}_RGCTXs {{\n");
-            for (int i = 0; i < info.RGCTXs.Count; i++)
-            {
-                var rgctx = info.RGCTXs[i];
-                switch (rgctx.Type)
-                {
-                    case Il2CppRGCTXDataType.IL2CPP_RGCTX_DATA_TYPE:
-                        sb.Append($"\t{pointer("Il2CppType")} _{i}_{rgctx.TypeName};\n");
-                        break;
-                    case Il2CppRGCTXDataType.IL2CPP_RGCTX_DATA_CLASS:
-                        sb.Append($"\t{pointer("Il2CppClass")} _{i}_{rgctx.ClassName};\n");
-                        break;
-                    case Il2CppRGCTXDataType.IL2CPP_RGCTX_DATA_METHOD:
-                        sb.Append($"\t{pointer("MethodInfo")} _{i}_{rgctx.MethodName};\n");
-                        break;
-                }
-            }
-            sb.Append("};\n");
-
-            sb.Append($"struct {info.TypeName}_VTable {{\n");
-            foreach (var method in info.VTableMethod)
-            {
-                sb.Append($"\tVirtualInvokeData {method.MethodName};\n");
-            }
-            sb.Append("};\n");
-
-            sb.Append($"struct {info.TypeName}_c {{\n" +
-                $"\tIl2CppClass_1 _1;\n" +
-                $"\tstruct {pointer($"{info.TypeName}_StaticFields")} static_fields;\n" +
-                $"\t{pointer($"{info.TypeName}_RGCTXs")} rgctx_data;\n" +
-                $"\tIl2CppClass_2 _2;\n" +
-                $"\t{info.TypeName}_VTable vtable;\n" +
-                $"}};\n");
-
-            sb.Append($"struct {info.TypeName}_o {{\n");
-            if (!info.IsValueType)
-            {
-                sb.Append($"\t{pointer($"{info.TypeName}_c")} klass;\n");
-                sb.Append($"\t{pointer("void")} monitor;\n");
-            }
-            for (int i = 0; i < info.Parents.Count; i++)
-            {
-                var parent = info.Parents[i];
-                var parentStructName = parent + "_o";
-                pre.Append(RecursionStructInfo(structInfoWithStructName[parentStructName]));
-                sb.Append($"\t{parent}_Fields parent_fields_{i};\n");
-            }
-            sb.Append($"\t{info.TypeName}_Fields fields;\n");
-            sb.Append("};\n");
-
-            sb.Append($"struct {info.TypeName}_StaticFields {{\n");
-            foreach (var field in info.StaticFields)
-            {
-                if (field.IsValueType)
-                {
-                    var fieldInfo = structInfoWithStructName[field.FieldTypeName];
-                    pre.Append(RecursionStructInfo(fieldInfo));
-                }
-                sb.Append($"\t{field.FieldTypeName} {field.FieldName};\n");
-            }
-            sb.Append("};\n");
-
-            return pre.Append(sb).ToString();
-        }
+        
 
         private string GetIl2CppStructName(Il2CppType il2CppType, Il2CppGenericContext context = null)
         {

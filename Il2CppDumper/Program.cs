@@ -230,12 +230,12 @@ namespace Il2CppDumper
             var scriptGenerator = new CoolHeaderGenerator(executor);
             scriptGenerator.WriteHeader(outputDir);
             Console.WriteLine("Done!");
-            if (config.GenerateDummyDll)
+            /*if (config.GenerateDummyDll)
             {
                 Console.WriteLine("Generate dummy dll...");
                 DummyAssemblyExporter.Export(metadata, il2Cpp, outputDir);
                 Console.WriteLine("Done!");
-            }
+            }*/
         }
     }
 }

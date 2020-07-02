@@ -10,7 +10,10 @@ namespace Il2CppDumper
     {
         public string TypeName;
         public bool IsValueType;
-        public List<string> Parents = new List<string>();
+        [ObsoleteAttribute] public List<string> Parents = new List<string>(); // not removing to not have to change ScriptGenerator.cs (should probably just replace this)
+        public string parent;
+        public Il2CppTypeDefinition parentTypeDef;
+        public Il2CppTypeDefinition typeDef;
         public List<StructFieldInfo> Fields = new List<StructFieldInfo>();
         public List<StructFieldInfo> StaticFields = new List<StructFieldInfo>();
         public List<StructVTableMethodInfo> VTableMethod = new List<StructVTableMethodInfo>();
