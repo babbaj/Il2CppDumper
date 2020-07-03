@@ -24,6 +24,8 @@ namespace Il2CppDumper
         private Dictionary<string, Il2CppType> nameGenericClassDic = new Dictionary<string, Il2CppType>();
         private List<ulong> genericClassList = new List<ulong>();
 
+        private Dictionary<Il2CppTypeDefinition, List<StructInfo>> dumbStructInfoMap = new Dictionary<Il2CppTypeDefinition, List<StructInfo>>();
+
         // TODO: these shouldnt be here
         private StringBuilder arrayClassPreHeader = new StringBuilder();
         private StringBuilder arrayClassHeader = new StringBuilder();
@@ -55,18 +57,23 @@ namespace Il2CppDumper
                 preHeader.Append($"struct {info.TypeName}_o;\n");
             }
 
+            IEnumerable<StructInfo> valueTypes = structInfoList.Where(info => info.IsValueType);
+            IEnumerable<StructInfo> classes = structInfoList.Where(info => !info.IsValueType);//.OrderBy(info => info.typeDef, Comparer<Il2CppTypeDefinition>.Create(orderByInheritance));
 
-            IEnumerable<StructInfo> valueTypes = structInfoList.Where(info => info.IsValueType); // TODO: this needs to be sorted
-            IEnumerable<StructInfo> classes = structInfoList.Where(info => !info.IsValueType).OrderBy(info => info.typeDef, Comparer<Il2CppTypeDefinition>.Create(orderByInheritance));
-
-            foreach(StructInfo info in valueTypes)
             {
-                headerStructs.Append(RecursiveDefineValueTypes(info));
+                var visited = new HashSet<StructInfo>();
+                foreach (StructInfo info in valueTypes)
+                {
+                    headerStructs.Append(RecursiveDefineValueTypes(info, visited));
+                }
             }
 
-            foreach (StructInfo info in classes)
             {
-                headerStructs.Append(DefineStruct(info));
+                var visited = new HashSet<StructInfo>();
+                foreach (StructInfo info in classes)
+                {
+                    headerStructs.Append(RecursiveDefineClassTypes(info, visited));
+                }
             }
             
 
@@ -190,27 +197,22 @@ namespace Il2CppDumper
             return GetTypeDefinition(parent);
         }
 
-        // returns the given type and its parents
         IEnumerable<Il2CppTypeDefinition> parents(Il2CppTypeDefinition typeDef)
         {
-            for (var parent = typeDef; parent != null; parent = getParent(parent))
+            for (var parent = getParent(typeDef); parent != null; parent = getParent(parent))
             {
                 yield return parent;
             }
         }
 
-        IEnumerable<Il2CppTypeDefinition> parents(StructInfo info)
-        {
-            return parents(info.typeDef);
-        }
 
-        int orderByInheritance(Il2CppTypeDefinition a, Il2CppTypeDefinition b)
+        /*int orderByInheritance(Il2CppTypeDefinition a, Il2CppTypeDefinition b)
         {
-            if (parents(a).Contains(b)) return 1;
-            else if (parents(b).Contains(a)) return -1;
+            if (a == b) return 0;
+            if (parents(a).Contains(b)) return -1;
+            else if (parents(b).Contains(a)) return 1;
             else return 0;
-        }
-
+        }*/
 
         ulong? offsetOfClass(Il2CppTypeDefinition def)
         {
@@ -229,8 +231,9 @@ namespace Il2CppDumper
             StringBuilder sb = new StringBuilder();
             if (!info.IsValueType)
             {
+                
                 sb.Append(StaticFieldsStruct(info));
-                sb.Append(VTableStruct(info));
+                //sb.Append(VTableStruct(info));
                 sb.Append(ClassStruct(info));
                 sb.Append(ObjectStruct(info));
             }
@@ -239,7 +242,7 @@ namespace Il2CppDumper
                 // Value types need to be ordered differently because static_fields can have instances of it
                 sb.Append(ObjectStruct(info));
                 sb.Append(StaticFieldsStruct(info));
-                sb.Append(VTableStruct(info));
+                //sb.Append(VTableStruct(info));
                 sb.Append(ClassStruct(info));
             }
             
@@ -248,31 +251,34 @@ namespace Il2CppDumper
             return sb.ToString();
         }
 
-        private string RecursiveDefineValueTypes(StructInfo info)
+
+        private string RecursiveDefineValueTypes(StructInfo info, HashSet<StructInfo> visitedStructs)
         {
-            return RecursiveDefineValueTypes(info, new HashSet<StructInfo>());
-        }
-        private string RecursiveDefineValueTypes(StructInfo info, HashSet<StructInfo> structCache)
-        {
-            if (!structCache.Add(info)) return string.Empty;
+            if (!visitedStructs.Add(info)) return string.Empty;
 
             var pre = new StringBuilder();
 
-            foreach (var field in info.Fields)
+            foreach (var field in info.Fields.Concat(info.StaticFields))
             {
                 if (field.IsValueType)
                 {
                     var fieldInfo = structInfoWithStructName[field.FieldTypeName];
-                    pre.Append(RecursiveDefineValueTypes(fieldInfo, structCache));
+                    pre.Append(RecursiveDefineValueTypes(fieldInfo, visitedStructs));
                 }
             }
-            foreach (var field in info.StaticFields)
+
+            return pre.Append(DefineStruct(info)).ToString();
+        }
+
+        private string RecursiveDefineClassTypes(StructInfo info, HashSet<StructInfo> visitedStructs)
+        {
+            if (!visitedStructs.Add(info)) return string.Empty;
+
+            var pre = new StringBuilder();
+
+            foreach (var parent in parents(info.typeDef).SelectMany(def => dumbStructInfoMap[def]))
             {
-                if (field.IsValueType)
-                {
-                    var fieldInfo = structInfoWithStructName[field.FieldTypeName];
-                    pre.Append(RecursiveDefineValueTypes(fieldInfo, structCache));
-                }
+                pre.Append(RecursiveDefineClassTypes(parent, visitedStructs));
             }
 
             return pre.Append(DefineStruct(info)).ToString();
@@ -294,7 +300,7 @@ namespace Il2CppDumper
                 $"\t{pointer($"{info.TypeName}_StaticFields")} static_fields;\n" +
                 $"\t{pointer("void")} rgctx_data;\n" + //$"\t{pointer($"{info.TypeName}_RGCTXs")} rgctx_data;\n" +
                 $"\tIl2CppClass_2 _2;\n" +
-                $"\t{info.TypeName}_VTable vtable;\n" +
+                //$"\t{info.TypeName}_VTable vtable;\n" +
                 $"}};\n"
                 );
 
@@ -302,7 +308,6 @@ namespace Il2CppDumper
         }
 
         // _o
-        // TODO: inherit from parent and only list fields for this class
         private string ObjectStruct(StructInfo info)
         {
             StringBuilder sb = new StringBuilder();
@@ -510,6 +515,18 @@ namespace Il2CppDumper
             }
         }
 
+        void AddStructInfo(Il2CppTypeDefinition typeDef, StructInfo info)
+        {
+            if (!dumbStructInfoMap.ContainsKey(typeDef))
+            {
+                dumbStructInfoMap.Add(typeDef, new List<StructInfo> { info });
+            }
+            else
+            {
+                dumbStructInfoMap[typeDef].Add(info);
+            }
+        }
+
         private void AddStruct(Il2CppTypeDefinition typeDef)
         {
             var structInfo = new StructInfo();
@@ -521,6 +538,7 @@ namespace Il2CppDumper
             AddVTableMethod(structInfo, typeDef);
             AddRGCTX(structInfo, typeDef);
             structInfo.typeDef = typeDef;
+            AddStructInfo(typeDef, structInfo);
         }
 
         private void AddGenericClassStruct(ulong pointer)
@@ -535,6 +553,7 @@ namespace Il2CppDumper
             AddFields(typeDef, structInfo, genericClass.context);
             AddVTableMethod(structInfo, typeDef);
             structInfo.typeDef = typeDef;
+            AddStructInfo(typeDef, structInfo);
         }
 
         private void SetParent(Il2CppTypeDefinition typeDef, StructInfo structInfo)
