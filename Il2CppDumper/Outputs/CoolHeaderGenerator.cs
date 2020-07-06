@@ -228,11 +228,6 @@ namespace Il2CppDumper
                 this.dsize = dsize;
             }
 
-            /*public int getSizeof()
-            {
-                return alignedOffset(dsize, align);
-            }*/
-
             public static readonly StructLayout pointer = primitive(8);
 
             public static StructLayout primitive(int size)
@@ -349,7 +344,7 @@ namespace Il2CppDumper
 
             foreach (var field in info.Fields)
             {
-                var D = layoutOfType(field.type);
+                var D = layoutOfType(field.type, info.context);
 
                 var offset = roundUpToMultiple(dsize, D.align); // "Start at offset dsize(C), incremented if necessary for alignment to nvalign(D) for base classes or to align(D) for data members"
                 size = Math.Max(size, offset + D.size); // "Otherwise, if D is a data member, update sizeof(C) to max (sizeof(C), offset(D)+sizeof(D))."
@@ -466,7 +461,6 @@ namespace Il2CppDumper
                 var offset = offsetOfClass(info.typeDef);
                 sb.Append($"\tstatic constexpr auto offset = 0x{offset:X};\n");
             }
-            //sb.Append($"\tstatic constexpr auto name = \"{metadata.GetStringFromIndex(info.typeDef.nameIndex)}\";\n");
             sb.Append($"\tstatic constexpr auto name = \"{executor.GetTypeDefName(info.typeDef, true, true)}\";\n");
             sb.Append(
                 $"\tIl2CppClass_1 _1;\n" +
@@ -723,6 +717,7 @@ namespace Il2CppDumper
             AddFields(typeDef, structInfo, genericClass.context);
             AddVTableMethod(structInfo, typeDef);
             structInfo.typeDef = typeDef;
+            structInfo.context = genericClass.context;
             dumbStructInfoMap[typeDef] = structInfo;
         }
 

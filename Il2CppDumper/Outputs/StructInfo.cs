@@ -14,6 +14,7 @@ namespace Il2CppDumper
         public string parent;
         public Il2CppTypeDefinition parentTypeDef;
         public Il2CppTypeDefinition typeDef;
+        public Il2CppGenericContext context;
         public List<StructFieldInfo> Fields = new List<StructFieldInfo>();
         public List<StructFieldInfo> StaticFields = new List<StructFieldInfo>();
         public List<StructVTableMethodInfo> VTableMethod = new List<StructVTableMethodInfo>();
