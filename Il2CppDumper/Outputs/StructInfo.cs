@@ -22,6 +22,7 @@ namespace Il2CppDumper
 
     public class StructFieldInfo
     {
+        public Il2CppType type;
         public string FieldTypeName;
         public string FieldName;
         public bool IsValueType;

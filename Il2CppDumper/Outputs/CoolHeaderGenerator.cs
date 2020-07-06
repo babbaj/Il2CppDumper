@@ -24,7 +24,7 @@ namespace Il2CppDumper
         private Dictionary<string, Il2CppType> nameGenericClassDic = new Dictionary<string, Il2CppType>();
         private List<ulong> genericClassList = new List<ulong>();
 
-        private Dictionary<Il2CppTypeDefinition, List<StructInfo>> dumbStructInfoMap = new Dictionary<Il2CppTypeDefinition, List<StructInfo>>();
+        private Dictionary<Il2CppTypeDefinition, StructInfo> dumbStructInfoMap = new Dictionary<Il2CppTypeDefinition, StructInfo>();
 
         // TODO: these shouldnt be here
         private StringBuilder arrayClassPreHeader = new StringBuilder();
@@ -214,11 +214,182 @@ namespace Il2CppDumper
             else return 0;
         }*/
 
+
+        class StructLayout
+        {
+            public readonly int align;
+            public readonly int size;
+            public readonly int dsize;
+
+            public StructLayout(int align, int size, int dsize)
+            {
+                this.align = align;
+                this.size = size;
+                this.dsize = dsize;
+            }
+
+            /*public int getSizeof()
+            {
+                return alignedOffset(dsize, align);
+            }*/
+
+            public static readonly StructLayout pointer = primitive(8);
+
+            public static StructLayout primitive(int size)
+            {
+                return new StructLayout(size, size, size);
+            }
+        }
+
+        StructLayout layoutOfType(Il2CppType il2CppType, Il2CppGenericContext context = null)
+        {
+            switch (il2CppType.type)
+            {
+                //case Il2CppTypeEnum.IL2CPP_TYPE_VOID:
+                case Il2CppTypeEnum.IL2CPP_TYPE_BOOLEAN:
+                    return StructLayout.primitive(1);
+                case Il2CppTypeEnum.IL2CPP_TYPE_CHAR:
+                    return StructLayout.primitive(2);
+                case Il2CppTypeEnum.IL2CPP_TYPE_I1:
+                    return StructLayout.primitive(1);
+                case Il2CppTypeEnum.IL2CPP_TYPE_U1:
+                    return StructLayout.primitive(1);
+                case Il2CppTypeEnum.IL2CPP_TYPE_I2:
+                    return StructLayout.primitive(2);
+                case Il2CppTypeEnum.IL2CPP_TYPE_U2:
+                    return StructLayout.primitive(2);
+                case Il2CppTypeEnum.IL2CPP_TYPE_I4:
+                    return StructLayout.primitive(4);
+                case Il2CppTypeEnum.IL2CPP_TYPE_U4:
+                    return StructLayout.primitive(4);
+                case Il2CppTypeEnum.IL2CPP_TYPE_I8:
+                    return StructLayout.primitive(8);
+                case Il2CppTypeEnum.IL2CPP_TYPE_U8:
+                    return StructLayout.primitive(8);
+                case Il2CppTypeEnum.IL2CPP_TYPE_R4:
+                    return StructLayout.primitive(4);
+                case Il2CppTypeEnum.IL2CPP_TYPE_R8:
+                    return StructLayout.primitive(8);
+                case Il2CppTypeEnum.IL2CPP_TYPE_STRING:
+                    return StructLayout.pointer;
+                case Il2CppTypeEnum.IL2CPP_TYPE_PTR:
+                    return StructLayout.pointer;
+                case Il2CppTypeEnum.IL2CPP_TYPE_VALUETYPE:
+                    {
+                        Il2CppTypeDefinition typeDef = metadata.typeDefs[il2CppType.data.klassIndex];
+                        if (typeDef.IsEnum)
+                        {
+                            return layoutOfType(il2Cpp.types[typeDef.elementTypeIndex]);
+                        }
+                        return layoutOf(dumbStructInfoMap[typeDef]); // not sure if this is right
+                    }
+                case Il2CppTypeEnum.IL2CPP_TYPE_CLASS:
+                    return StructLayout.pointer;
+                case Il2CppTypeEnum.IL2CPP_TYPE_VAR:
+                    {
+                        if (context != null)
+                        {
+                            var genericParameter = metadata.genericParameters[il2CppType.data.genericParameterIndex];
+                            var genericInst = il2Cpp.MapVATR<Il2CppGenericInst>(context.class_inst);
+                            var pointers = il2Cpp.MapVATR<ulong>(genericInst.type_argv, genericInst.type_argc);
+                            var pointer = pointers[genericParameter.num];
+                            var type = il2Cpp.GetIl2CppType(pointer);
+                            return layoutOfType(type); // no idea if this will ever not be a pointer
+                        }
+                        return StructLayout.pointer;
+                    }
+                case Il2CppTypeEnum.IL2CPP_TYPE_ARRAY:
+                    return StructLayout.pointer;
+                case Il2CppTypeEnum.IL2CPP_TYPE_GENERICINST:
+                    {
+                        var genericClass = il2Cpp.MapVATR<Il2CppGenericClass>(il2CppType.data.generic_class);
+                        var typeDef = metadata.typeDefs[genericClass.typeDefinitionIndex];
+                        if (typeDef.IsValueType)
+                        {
+                            if (typeDef.IsEnum)
+                            {
+                                return layoutOfType(il2Cpp.types[typeDef.elementTypeIndex]);
+                            }
+                            return layoutOfType(il2Cpp.types[typeDef.byvalTypeIndex]);//typeStructName + "_o";
+                        } else
+                        {
+                            return StructLayout.pointer;
+                        }
+                    }
+                case Il2CppTypeEnum.IL2CPP_TYPE_TYPEDBYREF:
+                    return StructLayout.pointer;
+                case Il2CppTypeEnum.IL2CPP_TYPE_I:
+                    return StructLayout.pointer;
+                case Il2CppTypeEnum.IL2CPP_TYPE_U:
+                    return StructLayout.pointer;
+                case Il2CppTypeEnum.IL2CPP_TYPE_OBJECT:
+                    return StructLayout.pointer;
+                case Il2CppTypeEnum.IL2CPP_TYPE_SZARRAY:
+                    return StructLayout.pointer;
+                case Il2CppTypeEnum.IL2CPP_TYPE_MVAR:
+                    return StructLayout.pointer;
+                default:
+                    throw new NotSupportedException();
+            }
+        }
+
+        static int roundUpToMultiple(int dsize, int align)
+        {
+            if (dsize % align == 0) return dsize;
+            return dsize + (align - (dsize % align));
+        }
+
+
+        // This assumes the tail padding of all the parents has been filled
+        StructLayout layoutOf(StructInfo info, int alignment)
+        {
+            int align = alignment;
+            int size = 0;  // sizeof
+            int dsize = 0; // data size 
+
+            foreach (var field in info.Fields)
+            {
+                var D = layoutOfType(field.type);
+
+                var offset = roundUpToMultiple(dsize, D.align); // "Start at offset dsize(C), incremented if necessary for alignment to nvalign(D) for base classes or to align(D) for data members"
+                size = Math.Max(size, offset + D.size); // "Otherwise, if D is a data member, update sizeof(C) to max (sizeof(C), offset(D)+sizeof(D))."
+                dsize = offset + D.size; // " If D is any other data member, update dsize(C) to offset(D)+sizeof(D)"
+                align = Math.Max(align, D.align); // ", align(C) to max (align(C), align(D))."
+            }
+            size = roundUpToMultiple(size, align); // "Then, round sizeof(C) up to a non-zero multiple of align(C)"
+
+            return new StructLayout(align, size, dsize);
+        }
+
+        StructLayout layoutOf(StructInfo info)
+        {
+            var parentsList = parents(info.typeDef).ToList();
+            IEnumerable<Il2CppTypeDefinition> poz = parentsList;
+
+            int align = 1;
+            foreach (var def in poz.Reverse()) // iterate from top to bottom
+            {
+                var parentInfo = dumbStructInfoMap[def];
+                align = Math.Max(layoutOf(parentInfo, align).align, align);
+            }
+
+            return layoutOf(info, align);
+        }
+
+        int tailPadding(StructInfo info)
+        {
+            var layout = layoutOf(info);
+           
+            return layout.size - layout.dsize;
+        }
+
         ulong? offsetOfClass(Il2CppTypeDefinition def)
         {
+            var indicis = new int[] { def.elementTypeIndex, def.byvalTypeIndex };
             foreach (var i in metadata.metadataUsageDic[1]) //kIl2CppMetadataUsageTypeInfo
             {
-                if (i.Value == def.elementTypeIndex)
+                //if (i.Value == def.elementTypeIndex)
+                if (indicis.Any(x => x == i.Value))
                 {
                     return il2Cpp.GetRVA(il2Cpp.metadataUsages[i.Key]);
                 }
@@ -276,7 +447,7 @@ namespace Il2CppDumper
 
             var pre = new StringBuilder();
 
-            foreach (var parent in parents(info.typeDef).SelectMany(def => dumbStructInfoMap[def]))
+            foreach (var parent in parents(info.typeDef).Select(def => dumbStructInfoMap[def]))
             {
                 pre.Append(RecursiveDefineClassTypes(parent, visitedStructs));
             }
@@ -295,6 +466,8 @@ namespace Il2CppDumper
                 var offset = offsetOfClass(info.typeDef);
                 sb.Append($"\tstatic constexpr auto offset = 0x{offset:X};\n");
             }
+            //sb.Append($"\tstatic constexpr auto name = \"{metadata.GetStringFromIndex(info.typeDef.nameIndex)}\";\n");
+            sb.Append($"\tstatic constexpr auto name = \"{executor.GetTypeDefName(info.typeDef, true, true)}\";\n");
             sb.Append(
                 $"\tIl2CppClass_1 _1;\n" +
                 $"\t{pointer($"{info.TypeName}_StaticFields")} static_fields;\n" +
@@ -331,6 +504,13 @@ namespace Il2CppDumper
             {
                 sb.Append($"\t{field.FieldTypeName} {field.FieldName};\n");
             }
+
+            int padding = tailPadding(info);
+            if (padding != 0)
+            {
+                sb.Append($"\tchar tailpad_{info.TypeName}[{padding}];\n"); // TODO: use number instead of appending type name
+            }
+
             sb.Append("};\n");
 
             return sb.ToString();
@@ -515,20 +695,10 @@ namespace Il2CppDumper
             }
         }
 
-        void AddStructInfo(Il2CppTypeDefinition typeDef, StructInfo info)
-        {
-            if (!dumbStructInfoMap.ContainsKey(typeDef))
-            {
-                dumbStructInfoMap.Add(typeDef, new List<StructInfo> { info });
-            }
-            else
-            {
-                dumbStructInfoMap[typeDef].Add(info);
-            }
-        }
 
         private void AddStruct(Il2CppTypeDefinition typeDef)
         {
+            if (dumbStructInfoMap.ContainsKey(typeDef)) return;
             var structInfo = new StructInfo();
             structInfoList.Add(structInfo);
             structInfo.TypeName = structNameDic[typeDef];
@@ -538,7 +708,7 @@ namespace Il2CppDumper
             AddVTableMethod(structInfo, typeDef);
             AddRGCTX(structInfo, typeDef);
             structInfo.typeDef = typeDef;
-            AddStructInfo(typeDef, structInfo);
+            dumbStructInfoMap[typeDef] = structInfo;
         }
 
         private void AddGenericClassStruct(ulong pointer)
@@ -553,7 +723,7 @@ namespace Il2CppDumper
             AddFields(typeDef, structInfo, genericClass.context);
             AddVTableMethod(structInfo, typeDef);
             structInfo.typeDef = typeDef;
-            AddStructInfo(typeDef, structInfo);
+            dumbStructInfoMap[typeDef] = structInfo;
         }
 
         private void SetParent(Il2CppTypeDefinition typeDef, StructInfo structInfo)
@@ -606,6 +776,7 @@ namespace Il2CppDumper
                     var fieldName = FixName(metadata.GetStringFromIndex(fieldDef.nameIndex));
                     structFieldInfo.FieldName = fieldName;
                     structFieldInfo.IsValueType = IsValueType(fieldType, context);
+                    structFieldInfo.type = fieldType;
                     if ((fieldType.attrs & FIELD_ATTRIBUTE_STATIC) != 0)
                     {
                         structInfo.StaticFields.Add(structFieldInfo);
