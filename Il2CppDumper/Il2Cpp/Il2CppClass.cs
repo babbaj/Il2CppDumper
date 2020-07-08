@@ -186,6 +186,21 @@ namespace Il2CppDumper
         public ulong class_inst;
         /* The instantiation corresponding to the method generic parameters */
         public ulong method_inst;
+
+        public override bool Equals(object obj)
+        {
+            return obj is Il2CppGenericContext context &&
+                   class_inst == context.class_inst &&
+                   method_inst == context.method_inst;
+        }
+
+        public override int GetHashCode()
+        {
+            var hashCode = -484178143;
+            hashCode = hashCode * -1521134295 + class_inst.GetHashCode();
+            hashCode = hashCode * -1521134295 + method_inst.GetHashCode();
+            return hashCode;
+        }
     }
 
     public class Il2CppGenericInst

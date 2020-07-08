@@ -182,6 +182,89 @@ namespace Il2CppDumper
 
         public bool IsValueType => (bitfield & 0x1) == 1;
         public bool IsEnum => ((bitfield >> 1) & 0x1) == 1;
+
+        public override bool Equals(object obj)
+        {
+            return obj is Il2CppTypeDefinition definition &&
+                   nameIndex == definition.nameIndex &&
+                   namespaceIndex == definition.namespaceIndex &&
+                   customAttributeIndex == definition.customAttributeIndex &&
+                   byvalTypeIndex == definition.byvalTypeIndex &&
+                   byrefTypeIndex == definition.byrefTypeIndex &&
+                   declaringTypeIndex == definition.declaringTypeIndex &&
+                   parentIndex == definition.parentIndex &&
+                   elementTypeIndex == definition.elementTypeIndex &&
+                   rgctxStartIndex == definition.rgctxStartIndex &&
+                   rgctxCount == definition.rgctxCount &&
+                   genericContainerIndex == definition.genericContainerIndex &&
+                   delegateWrapperFromManagedToNativeIndex == definition.delegateWrapperFromManagedToNativeIndex &&
+                   marshalingFunctionsIndex == definition.marshalingFunctionsIndex &&
+                   ccwFunctionIndex == definition.ccwFunctionIndex &&
+                   guidIndex == definition.guidIndex &&
+                   flags == definition.flags &&
+                   fieldStart == definition.fieldStart &&
+                   methodStart == definition.methodStart &&
+                   eventStart == definition.eventStart &&
+                   propertyStart == definition.propertyStart &&
+                   nestedTypesStart == definition.nestedTypesStart &&
+                   interfacesStart == definition.interfacesStart &&
+                   vtableStart == definition.vtableStart &&
+                   interfaceOffsetsStart == definition.interfaceOffsetsStart &&
+                   method_count == definition.method_count &&
+                   property_count == definition.property_count &&
+                   field_count == definition.field_count &&
+                   event_count == definition.event_count &&
+                   nested_type_count == definition.nested_type_count &&
+                   vtable_count == definition.vtable_count &&
+                   interfaces_count == definition.interfaces_count &&
+                   interface_offsets_count == definition.interface_offsets_count &&
+                   bitfield == definition.bitfield &&
+                   token == definition.token &&
+                   IsValueType == definition.IsValueType &&
+                   IsEnum == definition.IsEnum;
+        }
+
+        public override int GetHashCode()
+        {
+            var hashCode = 328281137;
+            hashCode = hashCode * -1521134295 + nameIndex.GetHashCode();
+            hashCode = hashCode * -1521134295 + namespaceIndex.GetHashCode();
+            hashCode = hashCode * -1521134295 + customAttributeIndex.GetHashCode();
+            hashCode = hashCode * -1521134295 + byvalTypeIndex.GetHashCode();
+            hashCode = hashCode * -1521134295 + byrefTypeIndex.GetHashCode();
+            hashCode = hashCode * -1521134295 + declaringTypeIndex.GetHashCode();
+            hashCode = hashCode * -1521134295 + parentIndex.GetHashCode();
+            hashCode = hashCode * -1521134295 + elementTypeIndex.GetHashCode();
+            hashCode = hashCode * -1521134295 + rgctxStartIndex.GetHashCode();
+            hashCode = hashCode * -1521134295 + rgctxCount.GetHashCode();
+            hashCode = hashCode * -1521134295 + genericContainerIndex.GetHashCode();
+            hashCode = hashCode * -1521134295 + delegateWrapperFromManagedToNativeIndex.GetHashCode();
+            hashCode = hashCode * -1521134295 + marshalingFunctionsIndex.GetHashCode();
+            hashCode = hashCode * -1521134295 + ccwFunctionIndex.GetHashCode();
+            hashCode = hashCode * -1521134295 + guidIndex.GetHashCode();
+            hashCode = hashCode * -1521134295 + flags.GetHashCode();
+            hashCode = hashCode * -1521134295 + fieldStart.GetHashCode();
+            hashCode = hashCode * -1521134295 + methodStart.GetHashCode();
+            hashCode = hashCode * -1521134295 + eventStart.GetHashCode();
+            hashCode = hashCode * -1521134295 + propertyStart.GetHashCode();
+            hashCode = hashCode * -1521134295 + nestedTypesStart.GetHashCode();
+            hashCode = hashCode * -1521134295 + interfacesStart.GetHashCode();
+            hashCode = hashCode * -1521134295 + vtableStart.GetHashCode();
+            hashCode = hashCode * -1521134295 + interfaceOffsetsStart.GetHashCode();
+            hashCode = hashCode * -1521134295 + method_count.GetHashCode();
+            hashCode = hashCode * -1521134295 + property_count.GetHashCode();
+            hashCode = hashCode * -1521134295 + field_count.GetHashCode();
+            hashCode = hashCode * -1521134295 + event_count.GetHashCode();
+            hashCode = hashCode * -1521134295 + nested_type_count.GetHashCode();
+            hashCode = hashCode * -1521134295 + vtable_count.GetHashCode();
+            hashCode = hashCode * -1521134295 + interfaces_count.GetHashCode();
+            hashCode = hashCode * -1521134295 + interface_offsets_count.GetHashCode();
+            hashCode = hashCode * -1521134295 + bitfield.GetHashCode();
+            hashCode = hashCode * -1521134295 + token.GetHashCode();
+            hashCode = hashCode * -1521134295 + IsValueType.GetHashCode();
+            hashCode = hashCode * -1521134295 + IsEnum.GetHashCode();
+            return hashCode;
+        }
     }
 
     public class Il2CppMethodDefinition

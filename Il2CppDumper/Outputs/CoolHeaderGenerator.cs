@@ -4,6 +4,7 @@ using System.IO;
 using System.Linq;
 using System.Text;
 using System.Text.RegularExpressions;
+using System.Diagnostics;
 using static Il2CppDumper.Il2CppConstants;
 
 namespace Il2CppDumper
@@ -17,14 +18,15 @@ namespace Il2CppDumper
         private Il2Cpp il2Cpp;
         private Dictionary<Il2CppTypeDefinition, int> typeDefImageIndices = new Dictionary<Il2CppTypeDefinition, int>();
         private HashSet<string> structNameHashSet = new HashSet<string>(StringComparer.Ordinal);
-        private List<StructInfo> structInfoList = new List<StructInfo>();
+        private HashSet<StructInfo> structInfoList = new HashSet<StructInfo>();
         private Dictionary<string, StructInfo> structInfoWithStructName = new Dictionary<string, StructInfo>();
         private Dictionary<Il2CppTypeDefinition, string> structNameDic = new Dictionary<Il2CppTypeDefinition, string>();
         private Dictionary<ulong, string> genericClassStructNameDic = new Dictionary<ulong, string>();
         private Dictionary<string, Il2CppType> nameGenericClassDic = new Dictionary<string, Il2CppType>();
         private List<ulong> genericClassList = new List<ulong>();
 
-        private Dictionary<Il2CppTypeDefinition, StructInfo> dumbStructInfoMap = new Dictionary<Il2CppTypeDefinition, StructInfo>();
+        // I'm not sure if I need this
+        [Obsolete] private Dictionary<(Il2CppTypeDefinition, Il2CppGenericContext), StructInfo> dumbStructInfoMap = new Dictionary<(Il2CppTypeDefinition, Il2CppGenericContext), StructInfo>();
 
         // TODO: these shouldnt be here
         private StringBuilder arrayClassPreHeader = new StringBuilder();
@@ -58,7 +60,7 @@ namespace Il2CppDumper
             }
 
             IEnumerable<StructInfo> valueTypes = structInfoList.Where(info => info.IsValueType);
-            IEnumerable<StructInfo> classes = structInfoList.Where(info => !info.IsValueType);//.OrderBy(info => info.typeDef, Comparer<Il2CppTypeDefinition>.Create(orderByInheritance));
+            IEnumerable<StructInfo> classes = structInfoList.Where(info => !info.IsValueType);
 
             {
                 var visited = new HashSet<StructInfo>();
@@ -95,6 +97,7 @@ namespace Il2CppDumper
         string head()
         {
             StringBuilder sb = new StringBuilder();
+            sb.Append("#pragma once\n");
             sb.Append("#include <cstdint>\n");
             sb.Append("#include \"pointer.hpp\"\n");
             sb.Append('\n');
@@ -131,6 +134,28 @@ namespace Il2CppDumper
             return "}\n"; // namespace rust
         }
 
+        IEnumerable<Il2CppTypeDefinition> GetAllTypeDefinitions()
+        {
+            // 处理函数 (Handler function)
+            for (var imageIndex = 0; imageIndex < metadata.imageDefs.Length; imageIndex++)
+            {
+                var imageDef = metadata.imageDefs[imageIndex];
+                var typeEnd = imageDef.typeStart + imageDef.typeCount;
+                for (int typeIndex = imageDef.typeStart; typeIndex < typeEnd; typeIndex++)
+                {
+                    var typeDef = metadata.typeDefs[typeIndex];
+                    yield return typeDef;
+                }
+            }
+        }
+
+        IEnumerable<StructInfo> GetStructInfoParents(StructInfo info)
+        {
+            for (StructInfo parent = info.parent; parent != null; parent = parent.parent)
+            {
+                yield return parent;
+            }
+        }
 
         void initializeState()
         {
@@ -162,58 +187,54 @@ namespace Il2CppDumper
                 var typeStructName = typeBaseName.Replace(typeToReplaceName, typeReplaceName);
                 nameGenericClassDic[typeStructName] = il2CppType;
                 genericClassStructNameDic[il2CppType.data.generic_class] = typeStructName;
+                // nword
             }
 
-            // 处理函数 (Handler function)
-            for (var imageIndex = 0; imageIndex < metadata.imageDefs.Length; imageIndex++)
+
+            var visitedTypes = new HashSet<(Il2CppTypeDefinition, Il2CppGenericContext)>();
+            foreach (var typeDef in GetAllTypeDefinitions())
             {
-                var imageDef = metadata.imageDefs[imageIndex];
-                var typeEnd = imageDef.typeStart + imageDef.typeCount;
-                for (int typeIndex = imageDef.typeStart; typeIndex < typeEnd; typeIndex++)
+                if (!visitedTypes.Add((typeDef, null))) continue;
+                StructInfo info = CreateStruct(typeDef);
+                Debug.Assert(info.context == null);
+
+                foreach (var parent in GetStructInfoParents(info))
                 {
-                    var typeDef = metadata.typeDefs[typeIndex];
-                    AddStruct(typeDef);
+                    visitedTypes.Add((parent.typeDef, parent.context));
+                    structInfoList.Add(parent);
                 }
+                structInfoList.Add(info);
             }
 
+            //var visitedGenericTypes = new HashSet<(Il2CppTypeDefinition, Il2CppGenericContext)>();
+            /*foreach(var def in visitedTypes) {
+                visitedGenericTypes.Add((def, null));
+            }*/
 
-            // I think this is header stuff
+
             for (int i = 0; i < genericClassList.Count; i++)
             {
                 var pointer = genericClassList[i];
-                AddGenericClassStruct(pointer);
+                var genericClass = il2Cpp.MapVATR<Il2CppGenericClass>(pointer);
+                var typeDef = metadata.typeDefs[genericClass.typeDefinitionIndex];
+                if (!visitedTypes.Add((typeDef, genericClass.context))) continue;
+
+                StructInfo info = CreateGenericStruct(typeDef, pointer);
+
+                foreach (var parent in GetStructInfoParents(info))
+                {
+                    visitedTypes.Add((parent.typeDef, parent.context));
+                    structInfoList.Add(parent);
+                }
+                structInfoList.Add(info);
             }
+
+            Console.WriteLine($"{GetAllTypeDefinitions().Count()} typeDefs");
             foreach (var info in structInfoList)
             {
                 structInfoWithStructName.Add(info.TypeName + "_o", info);
             }
         }
-
-
-        Il2CppTypeDefinition getParent(Il2CppTypeDefinition typeDef)
-        {
-            if (typeDef.parentIndex < 0) return null;
-            var parent = il2Cpp.types[typeDef.parentIndex];
-            return GetTypeDefinition(parent);
-        }
-
-        IEnumerable<Il2CppTypeDefinition> parents(Il2CppTypeDefinition typeDef)
-        {
-            for (var parent = getParent(typeDef); parent != null; parent = getParent(parent))
-            {
-                yield return parent;
-            }
-        }
-
-
-        /*int orderByInheritance(Il2CppTypeDefinition a, Il2CppTypeDefinition b)
-        {
-            if (a == b) return 0;
-            if (parents(a).Contains(b)) return -1;
-            else if (parents(b).Contains(a)) return 1;
-            else return 0;
-        }*/
-
 
         class StructLayout
         {
@@ -276,7 +297,7 @@ namespace Il2CppDumper
                         {
                             return layoutOfType(il2Cpp.types[typeDef.elementTypeIndex]);
                         }
-                        return layoutOf(dumbStructInfoMap[typeDef]); // not sure if this is right
+                        return layoutOf(dumbStructInfoMap[(typeDef, context)]); // not sure if this is right
                     }
                 case Il2CppTypeEnum.IL2CPP_TYPE_CLASS:
                     return StructLayout.pointer;
@@ -334,6 +355,20 @@ namespace Il2CppDumper
             return dsize + (align - (dsize % align));
         }
 
+        StructLayout layoutOfField(StructFieldInfo field)
+        {
+            if (field.IsValueType)
+            {
+                var fieldInfo = structInfoWithStructName[field.FieldTypeName];
+                Debug.Assert(fieldInfo.parent == null); // C# doesn't support inheritance for value types
+                return layoutOf(fieldInfo, 1);
+            }
+            else
+            {
+                // this is a little gay
+                return layoutOfType(field.type);
+            }
+        }
 
         // This assumes the tail padding of all the parents has been filled
         StructLayout layoutOf(StructInfo info, int alignment)
@@ -344,7 +379,7 @@ namespace Il2CppDumper
 
             foreach (var field in info.Fields)
             {
-                var D = layoutOfType(field.type, info.context);
+                var D = layoutOfField(field);
 
                 var offset = roundUpToMultiple(dsize, D.align); // "Start at offset dsize(C), incremented if necessary for alignment to nvalign(D) for base classes or to align(D) for data members"
                 size = Math.Max(size, offset + D.size); // "Otherwise, if D is a data member, update sizeof(C) to max (sizeof(C), offset(D)+sizeof(D))."
@@ -358,14 +393,13 @@ namespace Il2CppDumper
 
         StructLayout layoutOf(StructInfo info)
         {
-            var parentsList = parents(info.typeDef).ToList();
-            IEnumerable<Il2CppTypeDefinition> poz = parentsList;
+            var parentsList = GetStructInfoParents(info).ToList();
+            IEnumerable<StructInfo> poz = parentsList;
 
             int align = 1;
-            foreach (var def in poz.Reverse()) // iterate from top to bottom
+            foreach (var parent in poz.Reverse()) // iterate from top to bottom
             {
-                var parentInfo = dumbStructInfoMap[def];
-                align = Math.Max(layoutOf(parentInfo, align).align, align);
+                align = Math.Max(layoutOf(parent, align).align, align);
             }
 
             return layoutOf(info, align);
@@ -442,7 +476,7 @@ namespace Il2CppDumper
 
             var pre = new StringBuilder();
 
-            foreach (var parent in parents(info.typeDef).Select(def => dumbStructInfoMap[def]))
+            foreach (var parent in GetStructInfoParents(info))
             {
                 pre.Append(RecursiveDefineClassTypes(parent, visitedStructs));
             }
@@ -480,9 +514,9 @@ namespace Il2CppDumper
             StringBuilder sb = new StringBuilder();
            
             //sb.Append($"struct {info.TypeName}_o : {structNameDic[info.parentTypeDef]} {{\n");
-            if (info.parentTypeDef != null) {
+            if (info.parent != null) {
                 // This is a subclass
-                sb.Append($"struct {info.TypeName}_o : {structNameDic[info.parentTypeDef] + "_o"} {{\n");
+                sb.Append($"struct {info.TypeName}_o : {info.parent.TypeName + "_o"} {{\n");
             } else {
                 // This is a base class
                 sb.Append($"struct {info.TypeName}_o {{\n");
@@ -538,8 +572,94 @@ namespace Il2CppDumper
             return sb.ToString();
         }
 
-        // everything below here is copy/pasted
 
+        private StructInfo CreateStruct(Il2CppTypeDefinition typeDef)
+        {
+            StructInfo info = new StructInfo();
+            info.TypeName = structNameDic[typeDef];
+            info.IsValueType = typeDef.IsValueType;
+            info.typeDef = typeDef;
+            AddFields(typeDef, info, null);
+
+            if (!typeDef.IsValueType && !typeDef.IsEnum && typeDef.parentIndex >= 0)
+            {
+                Il2CppType parentType = il2Cpp.types[typeDef.parentIndex];
+                Il2CppTypeDefinition parentDef = GetTypeDefinition(parentType);
+                if (parentDef != null)
+                {
+                    Il2CppGenericContext parentContext = getGenericContext(parentType);
+
+                    StructInfo parent;
+                    if (dumbStructInfoMap.ContainsKey((parentDef, parentContext)))
+                    {
+                        parent = dumbStructInfoMap[(parentDef, parentContext)];
+                    } else
+                    {
+                        parent = parentContext == null ? CreateStruct(parentDef) : CreateGenericStruct(parentDef, parentType.data.generic_class);
+                    }
+                    info.parent = parent;
+                }
+            }
+
+            
+            dumbStructInfoMap.Add((typeDef, null), info);
+            return info;
+        }
+        
+
+        private StructInfo CreateGenericStruct(Il2CppTypeDefinition typeDef, ulong pointer)
+        {
+            var genericClass = il2Cpp.MapVATR<Il2CppGenericClass>(pointer);
+            Il2CppGenericContext context = genericClass.context;
+            Debug.Assert(context != null);
+
+            StructInfo info = new StructInfo();
+            info.TypeName = genericClassStructNameDic[pointer];
+            info.IsValueType = typeDef.IsValueType;
+            info.typeDef = typeDef;
+            info.context = context;
+            AddFields(typeDef, info, context);
+
+            if (!typeDef.IsValueType && !typeDef.IsEnum && typeDef.parentIndex >= 0)
+            {
+                Il2CppType parentType = il2Cpp.types[typeDef.parentIndex];
+                Il2CppTypeDefinition parentDef = GetTypeDefinition(parentType);
+                if (parentDef != null)
+                {
+                    Il2CppGenericContext parentContext = getGenericContext(parentType);
+
+                    StructInfo parent;
+                    if (dumbStructInfoMap.ContainsKey((parentDef, parentContext)))
+                    {
+                        parent = dumbStructInfoMap[(parentDef, parentContext)];
+                    }
+                    else
+                    {
+                        parent = parentContext == null ? CreateStruct(parentDef) : CreateGenericStruct(parentDef, parentType.data.generic_class);
+                    }
+                    info.parent = parent;
+                }
+            }
+
+            dumbStructInfoMap.Add((typeDef, context), info);
+            return info;
+        }
+
+        private Il2CppGenericContext getGenericContext(Il2CppType type)
+        {
+            if (type.type == Il2CppTypeEnum.IL2CPP_TYPE_GENERICINST)
+            {
+                var genericClass = il2Cpp.MapVATR<Il2CppGenericClass>(type.data.generic_class);
+                return genericClass.context;
+            } 
+            else
+            {
+                return null;
+            }
+        }
+
+
+        // everything below here is copy/pasted
 
         private static string FixName(string str)
         {
@@ -617,7 +737,8 @@ namespace Il2CppDumper
                             var pointers = il2Cpp.MapVATR<ulong>(genericInst.type_argv, genericInst.type_argc);
                             var pointer = pointers[genericParameter.num];
                             var type = il2Cpp.GetIl2CppType(pointer);
-                            return ParseType(type);
+                            var ret = ParseType(type);
+                            return ret;
                         }
                         return pointer("Il2CppObject");
                     }
@@ -686,69 +807,6 @@ namespace Il2CppDumper
                     }
                 default:
                     throw new NotSupportedException();
-            }
-        }
-
-
-        private void AddStruct(Il2CppTypeDefinition typeDef)
-        {
-            if (dumbStructInfoMap.ContainsKey(typeDef)) return;
-            var structInfo = new StructInfo();
-            structInfoList.Add(structInfo);
-            structInfo.TypeName = structNameDic[typeDef];
-            structInfo.IsValueType = typeDef.IsValueType;
-            SetParent(typeDef, structInfo);
-            AddFields(typeDef, structInfo, null);
-            AddVTableMethod(structInfo, typeDef);
-            AddRGCTX(structInfo, typeDef);
-            structInfo.typeDef = typeDef;
-            dumbStructInfoMap[typeDef] = structInfo;
-        }
-
-        private void AddGenericClassStruct(ulong pointer)
-        {
-            var genericClass = il2Cpp.MapVATR<Il2CppGenericClass>(pointer);
-            var typeDef = metadata.typeDefs[genericClass.typeDefinitionIndex];
-            var structInfo = new StructInfo();
-            structInfoList.Add(structInfo);
-            structInfo.TypeName = genericClassStructNameDic[pointer];
-            structInfo.IsValueType = typeDef.IsValueType;
-            SetParent(typeDef, structInfo);
-            AddFields(typeDef, structInfo, genericClass.context);
-            AddVTableMethod(structInfo, typeDef);
-            structInfo.typeDef = typeDef;
-            structInfo.context = genericClass.context;
-            dumbStructInfoMap[typeDef] = structInfo;
-        }
-
-        private void SetParent(Il2CppTypeDefinition typeDef, StructInfo structInfo)
-        {
-            if (!typeDef.IsValueType && !typeDef.IsEnum)
-            {
-                if (typeDef.parentIndex >= 0)
-                {
-                    var parent = il2Cpp.types[typeDef.parentIndex];
-                    var parentDef = GetTypeDefinition(parent);
-                    if (parentDef != null)
-                    {
-                        SetParent(parentDef, structInfo);
-                        if (parentDef.field_count > 0) // Not sure if this should be here
-                        {
-                            var fieldEnd = parentDef.fieldStart + parentDef.field_count;
-                            for (var i = parentDef.fieldStart; i < fieldEnd; ++i)
-                            {
-                                var fieldDef = metadata.fieldDefs[i];
-                                var fieldType = il2Cpp.types[fieldDef.typeIndex];
-                                if ((fieldType.attrs & FIELD_ATTRIBUTE_LITERAL) == 0 && (fieldType.attrs & FIELD_ATTRIBUTE_STATIC) == 0)
-                                {
-                                    structInfo.parent = GetIl2CppStructName(parent);
-                                    structInfo.parentTypeDef = parentDef;
-                                    break;
-                                }
-                            }
-                        }
-                    }
-                }
             }
         }
 

@@ -1,6 +1,7 @@
 ﻿using System;
 using System.IO;
 using System.Linq;
+using System.Diagnostics;
 using Newtonsoft.Json;
 #if NETFRAMEWORK
 using System.Windows.Forms;
@@ -88,17 +89,17 @@ namespace Il2CppDumper
                 ShowHelp();
                 return;
             }
-            try
-            {
+            //try
+            //{
                 if (Init(il2cppBytes, metadataBytes, out var metadata, out var il2Cpp))
                 {
                     Dump(metadata, il2Cpp, outputDir);
                 }
-            }
-            catch (Exception e)
+            //}
+            /*catch (Exception e)
             {
                 Console.WriteLine(e);
-            }
+            }*/
             if (config.RequireAnyKey)
             {
                 Console.WriteLine("Press any key to exit...");

@@ -11,14 +11,24 @@ namespace Il2CppDumper
         public string TypeName;
         public bool IsValueType;
         [ObsoleteAttribute] public List<string> Parents = new List<string>(); // not removing to not have to change ScriptGenerator.cs (should probably just replace this)
-        public string parent;
-        public Il2CppTypeDefinition parentTypeDef;
+        public StructInfo parent;
         public Il2CppTypeDefinition typeDef;
-        public Il2CppGenericContext context;
+        public Il2CppGenericContext context; // may be null
         public List<StructFieldInfo> Fields = new List<StructFieldInfo>();
         public List<StructFieldInfo> StaticFields = new List<StructFieldInfo>();
         public List<StructVTableMethodInfo> VTableMethod = new List<StructVTableMethodInfo>();
         public List<StructRGCTXInfo> RGCTXs = new List<StructRGCTXInfo>();
+
+        public override bool Equals(object obj)
+        {
+            return obj is StructInfo info &&
+                   TypeName == info.TypeName;
+        }
+
+        public override int GetHashCode()
+        {
+            return -448171650 + EqualityComparer<string>.Default.GetHashCode(TypeName);
+        }
     }
 
     public class StructFieldInfo
