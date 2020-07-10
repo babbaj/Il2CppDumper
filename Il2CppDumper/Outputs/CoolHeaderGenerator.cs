@@ -187,7 +187,6 @@ namespace Il2CppDumper
                 var typeStructName = typeBaseName.Replace(typeToReplaceName, typeReplaceName);
                 nameGenericClassDic[typeStructName] = il2CppType;
                 genericClassStructNameDic[il2CppType.data.generic_class] = typeStructName;
-                // nword
             }
 
 
@@ -205,11 +204,6 @@ namespace Il2CppDumper
                 }
                 structInfoList.Add(info);
             }
-
-            //var visitedGenericTypes = new HashSet<(Il2CppTypeDefinition, Il2CppGenericContext)>();
-            /*foreach(var def in visitedTypes) {
-                visitedGenericTypes.Add((def, null));
-            }*/
 
 
             for (int i = 0; i < genericClassList.Count; i++)
@@ -229,7 +223,6 @@ namespace Il2CppDumper
                 structInfoList.Add(info);
             }
 
-            Console.WriteLine($"{GetAllTypeDefinitions().Count()} typeDefs");
             foreach (var info in structInfoList)
             {
                 structInfoWithStructName.Add(info.TypeName + "_o", info);
@@ -310,7 +303,7 @@ namespace Il2CppDumper
                             var pointers = il2Cpp.MapVATR<ulong>(genericInst.type_argv, genericInst.type_argc);
                             var pointer = pointers[genericParameter.num];
                             var type = il2Cpp.GetIl2CppType(pointer);
-                            return layoutOfType(type); // no idea if this will ever not be a pointer
+                            return layoutOfType(type); // This might not be a pointer
                         }
                         return StructLayout.pointer;
                     }
@@ -355,18 +348,21 @@ namespace Il2CppDumper
             return dsize + (align - (dsize % align));
         }
 
-        StructLayout layoutOfField(StructFieldInfo field)
+        StructLayout layoutOfField(StructFieldInfo field, Il2CppGenericContext context)
         {
             if (field.IsValueType)
             {
                 var fieldInfo = structInfoWithStructName[field.FieldTypeName];
                 Debug.Assert(fieldInfo.parent == null); // C# doesn't support inheritance for value types
-                return layoutOf(fieldInfo, 1);
+                var layout =  layoutOf(fieldInfo, 1);
+                ;
+                return layout;
             }
             else
             {
-                // this is a little gay
-                return layoutOfType(field.type);
+                // this may include primitives
+                var layout = layoutOfType(field.type, context);
+                return layout;
             }
         }
 
@@ -379,7 +375,7 @@ namespace Il2CppDumper
 
             foreach (var field in info.Fields)
             {
-                var D = layoutOfField(field);
+                var D = layoutOfField(field, info.context);
 
                 var offset = roundUpToMultiple(dsize, D.align); // "Start at offset dsize(C), incremented if necessary for alignment to nvalign(D) for base classes or to align(D) for data members"
                 size = Math.Max(size, offset + D.size); // "Otherwise, if D is a data member, update sizeof(C) to max (sizeof(C), offset(D)+sizeof(D))."
