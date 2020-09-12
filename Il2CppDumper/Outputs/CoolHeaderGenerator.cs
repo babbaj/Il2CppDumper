@@ -44,7 +44,7 @@ namespace Il2CppDumper
 
         public void WriteHeader(string outputDir)
         {
-            File.WriteAllText(outputDir + "il2cpp.h", generateHeader());
+            File.WriteAllText(outputDir + "/il2cpp.h", generateHeader());
         }
 
         string generateHeader()
