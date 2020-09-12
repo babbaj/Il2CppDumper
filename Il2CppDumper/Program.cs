@@ -217,8 +217,8 @@ namespace Il2CppDumper
         {
             Console.WriteLine("Dumping...");
             var executor = new Il2CppExecutor(metadata, il2Cpp);
-            var decompiler = new Il2CppDecompiler(executor);
-            decompiler.Decompile(config, outputDir);
+            /*var decompiler = new Il2CppDecompiler(executor);
+            decompiler.Decompile(config, outputDir);*/
             Console.WriteLine("Done!");
             /*if (config.GenerateScript)
             {
