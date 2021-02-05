@@ -99,7 +99,7 @@ namespace Il2CppDumper
             StringBuilder sb = new StringBuilder();
             sb.Append("#pragma once\n");
             sb.Append("#include <cstdint>\n");
-            sb.Append("#include \"pointer.hpp\"\n");
+            sb.Append("#include \"../pointer.hpp\"\n");
             sb.Append('\n');
             sb.Append("namespace rust {\n");
 
@@ -522,11 +522,22 @@ namespace Il2CppDumper
                     sb.Append($"\t{pointer("void")} monitor;\n");
                 }
             }
-            
 
+            var usedNames = new Dictionary<string, int>();
             foreach (var field in info.Fields)
             {
-                sb.Append($"\t{field.FieldTypeName} {field.FieldName};\n");
+                string name = field.FieldName;
+                if (!usedNames.ContainsKey(name)) 
+                {
+                    sb.Append($"\t{field.FieldTypeName} {name};\n");
+                    usedNames[name] = 1;
+                } 
+                else
+                {
+                    int n = usedNames[name];
+                    sb.Append($"\t{field.FieldTypeName} {name}{n};\n");
+                    usedNames[name] = n + 1;
+                }
             }
 
             int padding = tailPadding(info);
