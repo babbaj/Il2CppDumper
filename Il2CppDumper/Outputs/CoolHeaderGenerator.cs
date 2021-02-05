@@ -504,6 +504,26 @@ namespace Il2CppDumper
             return sb.ToString();
         }
 
+        private void addStructFields(StringBuilder sb, IEnumerable<StructFieldInfo> fieldInfos)
+        {
+            var usedNames = new Dictionary<string, int>();
+            foreach (var field in fieldInfos)
+            {
+                string name = field.FieldName;
+                if (!usedNames.ContainsKey(name)) 
+                {
+                    sb.Append($"\t{field.FieldTypeName} {name};\n");
+                    usedNames[name] = 1;
+                } 
+                else
+                {
+                    int n = usedNames[name];
+                    sb.Append($"\t{field.FieldTypeName} {name}{n};\n");
+                    usedNames[name] = n + 1;
+                }
+            }
+        }
+        
         // _o
         private string ObjectStruct(StructInfo info)
         {
@@ -522,23 +542,8 @@ namespace Il2CppDumper
                     sb.Append($"\t{pointer("void")} monitor;\n");
                 }
             }
-
-            var usedNames = new Dictionary<string, int>();
-            foreach (var field in info.Fields)
-            {
-                string name = field.FieldName;
-                if (!usedNames.ContainsKey(name)) 
-                {
-                    sb.Append($"\t{field.FieldTypeName} {name};\n");
-                    usedNames[name] = 1;
-                } 
-                else
-                {
-                    int n = usedNames[name];
-                    sb.Append($"\t{field.FieldTypeName} {name}{n};\n");
-                    usedNames[name] = n + 1;
-                }
-            }
+            
+            addStructFields(sb, info.Fields);
 
             int padding = tailPadding(info);
             if (padding != 0)
@@ -556,10 +561,7 @@ namespace Il2CppDumper
         {
             StringBuilder sb = new StringBuilder();
             sb.Append($"struct {info.TypeName}_StaticFields {{\n");
-            foreach (var field in info.StaticFields)
-            {
-                sb.Append($"\t{field.FieldTypeName} {field.FieldName};\n");
-            }
+            addStructFields(sb, info.StaticFields);
             sb.Append("};\n");
 
             return sb.ToString();
